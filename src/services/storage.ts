@@ -643,6 +643,26 @@ export class StorageService {
     await this.db.prepare('DELETE FROM refresh_tokens WHERE token = ?').bind(tokenKey).run();
   }
 
+  // Keep a short overlap window for rotated refresh token to reduce
+  // multi-context refresh races (e.g. browser extension popup/background).
+  // Expiry is only tightened, never extended.
+  async constrainRefreshTokenExpiry(token: string, maxExpiresAtMs: number): Promise<void> {
+    const tokenKey = await this.refreshTokenKey(token);
+
+    await this.db.prepare(
+      'UPDATE refresh_tokens ' +
+      'SET expires_at = CASE WHEN expires_at > ? THEN ? ELSE expires_at END ' +
+      'WHERE token = ?'
+    ).bind(maxExpiresAtMs, maxExpiresAtMs, tokenKey).run();
+
+    // Best-effort legacy plaintext support for older rows.
+    await this.db.prepare(
+      'UPDATE refresh_tokens ' +
+      'SET expires_at = CASE WHEN expires_at > ? THEN ? ELSE expires_at END ' +
+      'WHERE token = ?'
+    ).bind(maxExpiresAtMs, maxExpiresAtMs, token).run();
+  }
+
   private async trustedTwoFactorTokenKey(token: string): Promise<string> {
     const digest = await this.sha256Hex(token);
     return `sha256:${digest}`;

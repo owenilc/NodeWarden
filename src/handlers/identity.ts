@@ -244,8 +244,12 @@ export async function handleToken(request: Request, env: Env): Promise<Response>
       return identityErrorResponse('Invalid refresh token', 'invalid_grant', 400);
     }
 
-    // Revoke old refresh token (prevent reuse)
-    await storage.deleteRefreshToken(refreshToken);
+    // Keep a short overlap window for old refresh token to absorb
+    // concurrent refresh requests from multiple client contexts.
+    await storage.constrainRefreshTokenExpiry(
+      refreshToken,
+      Date.now() + LIMITS.auth.refreshTokenOverlapGraceMs
+    );
 
     const { accessToken, user } = result;
     const newRefreshToken = await auth.generateRefreshToken(user.id);
